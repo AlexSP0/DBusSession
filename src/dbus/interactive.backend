@@ -1,0 +1,16 @@
+name = "interactive_example"
+type = "Backend"
+module = "executor"
+interface = "interactive"
+
+[methods.Run]
+execute = "/home/alsa/dev/DBusSession/build/Desktop-Debug/src/backends/dbus-getter/dbus-getter {queue}"
+stdout_signal_name = "interactive_stdout_signal"
+stderr_signal_name = "interactive_stderr_signal"
+thread_limit = 10
+action_id = "Run"
+
+[methods.Send]
+execute = "/home/alsa/dev/DBusSession/build/Desktop-Debug/src/backends/dbus-sender/dbus-sender {queue} {xml}"
+thread_limit = 10
+action_id = "Send"

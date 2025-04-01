@@ -1,0 +1,35 @@
+<!DOCTYPE node PUBLIC
+"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node name="/" xmlns:doc="http://www.freedesktop.org/dbus/1.0/doc.dtd">
+	<interface name="org.altlinux.alterator.interactive">
+		<doc:doc>
+			<doc:description>
+				<doc:para>
+					Example interactive interface.
+				</doc:para>
+			</doc:description>
+		</doc:doc>
+
+    <!-- methods -->
+		<method name="Run">
+			<arg type='s' name='queue' direction='in'></arg>
+			<arg type='i' name='response' direction='out'></arg>
+		</method>
+
+		<method name="Send">
+			<arg type='s' name='queue' direction='in'></arg>
+			<arg type='s' name='xml' direction='in'></arg>
+			<arg type='i' name='response' direction='out'></arg>
+		</method>
+
+    <!-- signals -->
+		<signal name="interactive_stderr_signal">
+			<arg type="s" name=""/>
+		</signal>
+
+		<signal name="interactive_stdout_signal">
+			<arg type="s" name=""/>
+		</signal>
+	</interface>
+</node>
