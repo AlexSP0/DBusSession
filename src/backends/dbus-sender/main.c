@@ -2,8 +2,8 @@
 #include <mqueue.h>
 #include <stdio.h>
 
-#define MAX_MESSAGES 10
-#define MAX_MSG_SIZE 1024 * 1024 //1Mb
+#define MAX_MESSAGES 5
+#define MAX_MSG_SIZE 1024 //1Mb
 
 int main(int argc, char **argv)
 {
@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     queue = mq_open(queue_name, O_CREAT | O_EXCL | O_WRONLY, 0644, &attr);
     if (queue != (mqd_t) -1)
     {
-        fprintf(stderr, "Queue &s is not exists.\n");
+        fprintf(stderr, "Queue %s is not exists.\n");
         ret = 1;
         goto end;
     }
@@ -74,8 +74,6 @@ end:
     g_free(message);
 
     mq_close(queue);
-
-    mq_unlink(queue_name);
 
     return ret;
 }
