@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #define MAX_MESSAGES 10
-#define MAX_MSG_SIZE 1024 * 2 //2Mb
+#define MAX_MSG_SIZE 1024 * 1024 //1Mb
 
 int main(int argc, char **argv)
 {
@@ -19,10 +19,10 @@ int main(int argc, char **argv)
         goto end;
     }
 
-    buffer = g_malloc(MAX_MSG_SIZE + 1);
+    buffer = g_malloc(MAX_MSG_SIZE);
     if (!buffer)
     {
-        fprintf(stderr, "Can't allocate %d bytes\n", MAX_MSG_SIZE + 1);
+        fprintf(stderr, "Can't allocate %d bytes\n", MAX_MSG_SIZE);
         ret = 1;
         goto end;
     }
@@ -64,6 +64,8 @@ end:
         g_free(buffer);
 
     mq_close(queue);
+
+    mq_unlink(argv[1]);
 
     return ret;
 }

@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #define MAX_MESSAGES 10
-#define MAX_MSG_SIZE 1024 * 2 //2Kb
+#define MAX_MSG_SIZE 1024 * 1024 //1Mb
 
 int main(int argc, char **argv)
 {
