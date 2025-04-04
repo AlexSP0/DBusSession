@@ -283,7 +283,7 @@ static int call_run_method(const char *queue)
     reply_type = G_VARIANT_TYPE("(i)");
 
     //TODO set timeout
-    result = g_dbus_proxy_call_sync(proxy, RUN_METHOD, parameters, G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
+    result = g_dbus_proxy_call_sync(proxy, RUN_METHOD, parameters, G_DBUS_CALL_FLAGS_NONE, G_MAXINT, NULL, &error);
 
     atomic_store(&conn_status, NO_CONNECT);
 
