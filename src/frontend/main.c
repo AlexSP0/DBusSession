@@ -1,8 +1,11 @@
+#include <fcntl.h>
 #include <gio/gio.h>
 #include <glib-object.h>
 #include <glib/gvariant.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #define QUEUE_NAME "/mqueue"
 #define SERVICE "org.altlinux.alterator"
@@ -25,8 +28,9 @@ typedef enum CONN_STATUS
 atomic_int conn_status = NO_CONNECT;
 pthread_t connector    = 0;
 pthread_t worker       = 0;
+GMainLoop *main_loop   = {0};
 
-static int call_send_method(const char *queue, const char *message);
+static int call_send_method(const char *message);
 static int subscribe_signals();
 static int stdout_signal(const char *message);
 static int stderr_signal(const char *message);
@@ -56,30 +60,24 @@ static void run_stdout_signal_handler(GDBusConnection *connection,
                                       GVariant *parameters,
                                       gpointer user_data)
 {
-    for (int i = 0; i < g_variant_n_children(parameters); i++)
+    const gchar *message = NULL;
+
+    int status = atomic_load(&conn_status);
+
+    if (status == TRY_TO_CONNECT)
     {
-        int status = atomic_load(&conn_status);
-
-        if (status == TRY_TO_CONNECT)
-        {
-            atomic_store(&conn_status, CONNECTED);
-        }
-        else if (status == NO_CONNECT || status == EXITING)
-        {
-            break;
-        }
-
-        GVariant *tmp = g_variant_get_child_value(parameters, i);
-
-        const gchar *str;
-
-        str = g_variant_get_string(tmp, NULL); //nonfree
-
-        g_print("%s\n", str);
-
-        g_variant_unref(tmp);
+        atomic_store(&conn_status, CONNECTED);
+    }
+    else if (status == NO_CONNECT || status == EXITING)
+    {
+        goto end;
     }
 
+    g_variant_get(parameters, "(s)", &message);
+    printf("STDOUT - Получено сообщение: %s\n", message);
+    fflush(stdout);
+
+end:
     return;
 }
 
@@ -91,30 +89,30 @@ static void run_stderr_signal_handler(GDBusConnection *connection,
                                       GVariant *parameters,
                                       gpointer user_data)
 {
-    for (int i = 0; i < g_variant_n_children(parameters); i++)
+    const gchar *message = NULL;
+
+    int status = atomic_load(&conn_status);
+
+    if (status == TRY_TO_CONNECT)
     {
-        int status = atomic_load(&conn_status);
-
-        if (status == TRY_TO_CONNECT)
-        {
-            atomic_store(&conn_status, CONNECTED);
-        }
-        else if (status == NO_CONNECT || status == EXITING)
-        {
-            break;
-        }
-
-        GVariant *tmp = g_variant_get_child_value(parameters, i);
-
-        const gchar *str;
-
-        str = g_variant_get_string(tmp, NULL); //nonfree
-
-        g_print("%s\n", str);
-
-        g_variant_unref(tmp);
+        atomic_store(&conn_status, CONNECTED);
+    }
+    else if (status == NO_CONNECT || status == EXITING)
+    {
+        goto end;
     }
 
+    g_variant_get(parameters, "(s)", &message);
+    printf("STDERR - Получено сообщение: %s\n", message);
+    fflush(stdout);
+
+    //Timeout from getter
+    if (!strstr("TIMEOUT", message))
+    {
+        atomic_store(&conn_status, EXITING);
+    }
+
+end:
     return;
 }
 
@@ -151,7 +149,7 @@ gchar *concat_signal_name_with_connection_name(const gchar *signal, const gchar 
 
     return result;
 }
-static int call_send_method(const char *queue, const char *message)
+static int call_send_method(const char *message)
 {
     int ret                        = 0;
     gint exit_code                 = -1;
@@ -169,7 +167,7 @@ static int call_send_method(const char *queue, const char *message)
         goto end;
     }
 
-    parameters = g_variant_new("(s)", message);
+    parameters = g_variant_new("(ss)", QUEUE_NAME, message);
     reply_type = G_VARIANT_TYPE("(i)");
 
     result = g_dbus_connection_call_sync(
@@ -178,13 +176,17 @@ static int call_send_method(const char *queue, const char *message)
     if (!result)
     {
         fprintf(stderr, "ERROR: can't get reply from send() method\n");
+        fprintf(stderr, "ERROR: %s\n", error->message);
+        atomic_store(&conn_status, EXITING);
         ret = 1;
         goto end;
     }
 
-    if (g_variant_get_type(result) != reply_type)
+    if (!g_variant_type_equal(g_variant_get_type(result), reply_type))
     {
         fprintf(stderr, "ERROR: Wrong answer type from send() method\n");
+        fprintf(stderr, "ERROR: %s\n", error->message);
+        atomic_store(&conn_status, EXITING);
         ret = 1;
         goto end;
     }
@@ -192,16 +194,14 @@ static int call_send_method(const char *queue, const char *message)
     g_variant_get(result, "(i)", &exit_code);
     if (exit_code != 0)
     {
-        fprintf(stderr, "ERROR: exit code from send() method is %d\n", exit_code);
-
         atomic_store(&conn_status, EXITING);
         ret = 1;
         goto end;
     }
 
 end:
-    if (parameters)
-        g_variant_unref(parameters);
+    //if (parameters)
+    //  g_variant_unref(parameters);
 
     if (result)
         g_variant_unref(result);
@@ -220,6 +220,7 @@ static int call_run_method(const char *queue)
     int ret                        = 0;
     GDBusConnection *connection    = NULL;
     GError *error                  = NULL;
+    GDBusProxy *proxy              = NULL;
     GVariant *parameters           = NULL;
     const GVariantType *reply_type = NULL;
     GVariant *result               = NULL;
@@ -255,7 +256,7 @@ static int call_run_method(const char *queue)
                                                             PATH,
                                                             NULL,
                                                             G_DBUS_SIGNAL_FLAGS_NO_MATCH_RULE,
-                                                            (gpointer) &run_stderr_signal_handler,
+                                                            (gpointer) &run_stdout_signal_handler,
                                                             NULL, //gpointer user-data
                                                             NULL);
 
@@ -266,15 +267,23 @@ static int call_run_method(const char *queue)
                                                             PATH,
                                                             NULL,
                                                             G_DBUS_SIGNAL_FLAGS_NO_MATCH_RULE,
-                                                            (gpointer) &run_stdout_signal_handler,
+                                                            (gpointer) &run_stderr_signal_handler,
                                                             NULL, //gpointer user-data
                                                             NULL);
+
+    proxy = g_dbus_proxy_new_sync(connection, G_DBUS_PROXY_FLAGS_NONE, NULL, SERVICE, PATH, INTERFACE, NULL, &error);
+    if (!proxy)
+    {
+        fprintf(stderr, "ERROR: can't create dbus proxy\n");
+        ret = 1;
+        goto end;
+    }
 
     parameters = g_variant_new("(s)", QUEUE_NAME);
     reply_type = G_VARIANT_TYPE("(i)");
 
-    result = g_dbus_connection_call_sync(
-        connection, SERVICE, PATH, INTERFACE, RUN_METHOD, parameters, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
+    //TODO set timeout
+    result = g_dbus_proxy_call_sync(proxy, RUN_METHOD, parameters, G_DBUS_CALL_FLAGS_NONE, -1, NULL, &error);
 
     atomic_store(&conn_status, NO_CONNECT);
 
@@ -284,14 +293,14 @@ static int call_run_method(const char *queue)
 
     if (!result)
     {
-        fprintf(stderr, "ERROR: can't get reply from send() method\n");
+        fprintf(stderr, "ERROR: can't get reply from run() method - %s\n", error->message);
         ret = 1;
         goto end;
     }
 
-    if (g_variant_get_type(result) != reply_type)
+    if (!g_variant_type_equal(g_variant_get_type(result), reply_type))
     {
-        fprintf(stderr, "ERROR: Wrong answer type from send() method\n");
+        fprintf(stderr, "ERROR: Wrong answer type from run() method\n");
         ret = 1;
         goto end;
     }
@@ -299,12 +308,15 @@ static int call_run_method(const char *queue)
     g_variant_get(result, "(i)", &exit_code);
     if (exit_code != 0)
     {
-        fprintf(stderr, "ERROR: exit code is %d\n", exit_code);
         ret = 1;
         goto end;
     }
 
 end:
+    atomic_store(&conn_status, EXITING);
+
+    g_main_loop_quit(main_loop);
+
     g_free(stderr_signal_name);
 
     g_free(stdout_signal_name);
@@ -312,11 +324,8 @@ end:
     if (result)
         g_variant_unref(result);
 
-    if (parameters)
-        g_variant_unref(parameters);
-
-    if (result)
-        g_variant_unref(result);
+    //if (parameters)
+    //  g_variant_unref(parameters);
 
     if (error)
         g_error_free(error);
@@ -350,6 +359,7 @@ static void *connector_func(void *)
     if (call_run_method((char *) QUEUE_NAME) != 0)
     {
         *ret = 1;
+        fflush(stdout);
         goto end;
     }
 
@@ -368,6 +378,11 @@ static void *worker_func(void *)
 
     *ret = 0;
 
+    //Nonblocking fgets
+
+    int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+
     while (TRUE)
     {
         int conn_st = atomic_load(&conn_status);
@@ -381,15 +396,53 @@ static void *worker_func(void *)
         }
 
         //Connected. Do work
-        while (scanf("%100[^\n]", buffer) <= 0)
-        {
-            fprintf(stderr, "Try another message, please\n");
-        }
+        printf("Input message or type \"exit\" to go out:\n");
+        fflush(stdout);
 
-        //send message
+        while (TRUE)
+        {
+            int status = atomic_load(&conn_status);
+
+            if (status != CONNECTED)
+                goto end;
+
+            if (fgets(buffer, BUFFER_SIZE, stdin) != NULL)
+            {
+                //Remove '\n'
+                size_t len = strlen(buffer);
+                if (len > 0 && buffer[len - 1] == '\n')
+                {
+                    buffer[len - 1] = '\0';
+                }
+
+                if (strlen(buffer) == 0)
+                {
+                    continue;
+                }
+
+                if (strstr("Exit", buffer))
+                {
+                    atomic_store(&conn_status, EXITING);
+                    printf("Exiting\n");
+                    continue;
+                }
+
+                //send message
+                if (call_send_method(buffer) != 0)
+                {
+                    fprintf(stderr, "ERROR: can't send message\n");
+
+                    atomic_store(&conn_status, EXITING);
+
+                    *ret = 1;
+                }
+            }
+        }
     }
 
 end:
+    fcntl(STDIN_FILENO, F_SETFL, flags);
+
     pthread_exit(ret);
 }
 
@@ -398,9 +451,8 @@ int main()
     int ret                = 0;
     void *connector_status = 0;
     void *worker_status    = 0;
-    int c                  = 0;
-    int w                  = 0;
 
+    fflush(stdout);
     if (pthread_create(&worker, NULL, &worker_func, NULL) != 0)
     {
         fprintf(stderr, "ERROR: can't create worker thread\n");
@@ -408,6 +460,7 @@ int main()
         goto end;
     }
 
+    fflush(stdout);
     if (pthread_create(&connector, NULL, &connector_func, NULL) != 0)
     {
         fprintf(stderr, "ERROR: can't create connector thread\n");
@@ -415,28 +468,32 @@ int main()
         goto end;
     }
 
+    main_loop = g_main_loop_new(NULL, FALSE);
+    g_main_loop_run(main_loop);
+
 end:
+    g_main_loop_unref(main_loop);
+
     if (connector)
     {
         pthread_join(connector, &connector_status);
-        if (!connector_status)
+        /*if (connector_status)
         {
             c = *((int *) connector_status);
             printf("connector status: %d\n", c);
             free(connector_status);
-        }
+        }*/
     }
 
     if (worker)
     {
         pthread_join(worker, &worker_status);
-        if (!worker_status)
+        /*if (worker_status)
         {
             w = *((int *) worker_status);
             printf("worker status: %d\n", w);
             free(worker_status);
-        }
+        }*/
     }
-
     return ret;
 }

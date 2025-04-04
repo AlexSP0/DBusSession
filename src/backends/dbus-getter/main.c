@@ -1,7 +1,9 @@
+#include <fcntl.h>
 #include <glib.h>
 #include <mqueue.h>
 #include <stdio.h>
 #include <time.h>
+#include <unistd.h>
 
 #define MAX_MESSAGES 5
 #define MAX_MSG_SIZE 1024 //1 Mb
@@ -15,17 +17,31 @@ int main(int argc, char **argv)
     char *buffer            = NULL;
     struct timespec timeout = {0};
 
+    /*int fd = open("/var/log/error1.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1)
+    {
+        perror("Ошибка при открытии файла");
+        return 1;
+    }
+
+    if (dup2(fd, STDERR_FILENO) == -1)
+    {
+        perror("Ошибка при дублировании дескриптора");
+        close(fd);
+        return 1;
+    }*/
+
     if (argc != 2)
     {
         fprintf(stderr, "Queue name must be specified\n");
-        ret = 1;
+        ret = 10;
         goto end;
     }
 
     if (argv[1][0] != '/')
     {
         fprintf(stderr, "Queue name must start with '/'\n");
-        ret = 1;
+        ret = 2;
         goto end;
     }
 
@@ -33,7 +49,7 @@ int main(int argc, char **argv)
     if (!buffer)
     {
         fprintf(stderr, "Can't allocate %d bytes\n", MAX_MSG_SIZE);
-        ret = 1;
+        ret = 3;
         goto end;
     }
 
@@ -46,9 +62,13 @@ int main(int argc, char **argv)
     if (queue == (mqd_t) -1)
     {
         fprintf(stderr, "Can't open queue \"%s\", errno = %d\n", argv[1], errno);
-        ret = 1;
+        ret = 4;
         goto end;
     }
+
+    //send signal, connection established
+    printf("connect\n");
+    fflush(stdout);
 
     clock_gettime(CLOCK_REALTIME, &timeout);
     timeout.tv_sec += TIMEOUT;
@@ -63,20 +83,24 @@ int main(int argc, char **argv)
             if (errno == ETIMEDOUT)
             {
                 fprintf(stderr, "TIMEOUT. Can't read message from queue %s\n", argv[1]);
-                ret = 1;
+                fflush(stderr);
+                ret = 5;
                 goto end;
             }
             fprintf(stderr, "Can't read message from queue %s\n", argv[1]);
+            fflush(stderr);
             ret = 1;
             goto end;
         }
         if (!strcmp(buffer, "exit"))
         {
             printf("Exiting\n");
+            fflush(stdout);
             break;
         }
 
-        printf("%s\n", buffer);
+        //Send answer message via signal
+        printf("!! - %s\n", buffer);
         fflush(stdout);
 
         //Update timeout
@@ -85,6 +109,11 @@ int main(int argc, char **argv)
     }
 
 end:
+    /*fprintf(stderr, "Exit code is %d\n", ret);
+    fflush(stderr);
+
+    close(fd);*/
+
     if (buffer)
         g_free(buffer);
 

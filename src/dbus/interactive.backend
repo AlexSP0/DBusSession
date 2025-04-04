@@ -9,6 +9,7 @@ stdout_signal_name = "interactive_stdout_signal"
 stderr_signal_name = "interactive_stderr_signal"
 thread_limit = 10
 action_id = "Run"
+timeout = 86400
 
 [methods.Send]
 execute = "/home/alsa/dev/DBusSession/build/Desktop-Debug/src/backends/dbus-sender/dbus-sender {queue} {xml}"
